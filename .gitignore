@@ -1,0 +1,48 @@
+# --- STM32CubeIDE / Eclipse build output ---
+Debug/
+Release/
+
+# Common generated output directories
+build/
+cmake-build-*/
+
+# --- Compiled objects / binaries ---
+*.o
+*.obj
+*.d
+*.su
+*.elf
+*.axf
+*.bin
+*.hex
+*.map
+*.list
+*.a
+
+# --- Linker / build helper files ---
+objects.list
+*.launch
+
+# --- Logs / temporary files ---
+*.log
+*.tmp
+*.swp
+*~
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- IDE user-specific files ---
+.idea/
+.vscode/*.code-workspace
+.vscode/.ropeproject/
+
+# --- STM32CubeIDE / Eclipse metadata (regenerated from .ioc) ---
+.project
+.cproject
+.mxproject
+.osx.project
+.settings/
+.metadata/
+

@@ -1,0 +1,53 @@
+{
+  "editor.formatOnSave": true,
+  "files.associations": {
+    "app_types.h": "c",
+    "*.h": "c"
+  },
+  "C_Cpp.files.associations": {
+    "*.h": "c"
+  },
+  "C_Cpp.default.cStandard": "c11",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.intelliSenseMode": "gcc-arm",
+  "C_Cpp.default.compilerPath": "/opt/homebrew/bin/arm-none-eabi-gcc",
+  "C_Cpp.default.defines": [
+    "USE_HAL_DRIVER",
+    "STM32F411xE"
+  ],
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/Inc",
+    "${workspaceFolder}/Src",
+    "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
+    "${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc/Legacy",
+    "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F4xx/Include",
+    "${workspaceFolder}/Drivers/CMSIS/Include",
+    "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/include",
+    "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2",
+    "${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F"
+  ],
+  "clangd.fallbackFlags": [
+    "-x",
+    "c",
+    "-std=c11",
+    "--target=arm-none-eabi",
+    "-mcpu=cortex-m4",
+    "-mthumb",
+    "-mfpu=fpv4-sp-d16",
+    "-mfloat-abi=hard",
+    "-DUSE_HAL_DRIVER",
+    "-DSTM32F411xE",
+    "-I${workspaceFolder}/Inc",
+    "-I${workspaceFolder}/Src",
+    "-I${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc",
+    "-I${workspaceFolder}/Drivers/STM32F4xx_HAL_Driver/Inc/Legacy",
+    "-I${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F4xx/Include",
+    "-I${workspaceFolder}/Drivers/CMSIS/Include",
+    "-I${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/include",
+    "-I${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2",
+    "-I${workspaceFolder}/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F"
+  ],
+  "clangd.arguments": [
+    "--query-driver=/opt/homebrew/bin/arm-none-eabi-*"
+  ]
+}

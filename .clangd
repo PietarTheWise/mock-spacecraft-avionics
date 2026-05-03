@@ -1,0 +1,21 @@
+CompileFlags:
+  Add:
+    - -x
+    - c
+    - -std=c11
+    - --target=arm-none-eabi
+    - -mcpu=cortex-m4
+    - -mthumb
+    - -mfpu=fpv4-sp-d16
+    - -mfloat-abi=hard
+    - -DUSE_HAL_DRIVER
+    - -DSTM32F411xE
+    - -I./Inc
+    - -I./Src
+    - -I./Drivers/STM32F4xx_HAL_Driver/Inc
+    - -I./Drivers/STM32F4xx_HAL_Driver/Inc/Legacy
+    - -I./Drivers/CMSIS/Device/ST/STM32F4xx/Include
+    - -I./Drivers/CMSIS/Include
+    - -I./Middlewares/Third_Party/FreeRTOS/Source/include
+    - -I./Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2
+    - -I./Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F
