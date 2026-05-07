@@ -94,10 +94,9 @@ Bmp280Sample g_latest_bmp280 = {0};
 FusionState g_fusion_state = {0};
 bool g_has_imu_sample = false;
 bool g_has_bmp280_sample = false;
-uint32_t g_app_status_flags = APP_STATUS_FLAG_PLACEHOLDER_DATA |
-                              APP_STATUS_FLAG_MPU6050_WIP |
-                              APP_STATUS_FLAG_BMP280_WIP |
-                              APP_STATUS_FLAG_FUSION_WIP;
+uint32_t g_app_status_flags =
+    APP_STATUS_FLAG_PLACEHOLDER_DATA | APP_STATUS_FLAG_MPU6050_WIP |
+    APP_STATUS_FLAG_BMP280_WIP | APP_STATUS_FLAG_FUSION_WIP;
 
 /* USER CODE END PV */
 
@@ -126,8 +125,7 @@ static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count);
  * @brief  The application entry point.
  * @retval int
  */
-int main(void)
-{
+int main(void) {
 
   HAL_Init();
 
@@ -146,35 +144,29 @@ int main(void)
   osKernelInitialize();
 
   appDataMutexHandle = osMutexNew(&appDataMutex_attributes);
-  if (appDataMutexHandle == NULL)
-  {
+  if (appDataMutexHandle == NULL) {
     Error_Handler();
   }
 
-  if (!I2C1_ProbeKnownAddresses((const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1},
-                                2U))
-  {
+  if (!I2C1_ProbeKnownAddresses(
+          (const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1}, 2U)) {
     Error_Handler();
   }
 
   if (!I2C1_ProbeKnownAddresses((const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1},
-                                2U))
-  {
+                                2U)) {
     Error_Handler();
   }
 
-  if (!MPU6050_Init())
-  {
+  if (!MPU6050_Init()) {
     Error_Handler();
   }
 
-  if (!BMP280_Init())
-  {
+  if (!BMP280_Init()) {
     Error_Handler();
   }
 
-  if (!Fusion_Init(&g_fusion_state))
-  {
+  if (!Fusion_Init(&g_fusion_state)) {
     Error_Handler();
   }
 
@@ -184,8 +176,7 @@ int main(void)
   fusionTaskHandle = osThreadNew(StartFusionTask, NULL, &fusionTask_attributes);
 
   if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL) ||
-      (tempTaskHandle == NULL) || (fusionTaskHandle == NULL))
-  {
+      (tempTaskHandle == NULL) || (fusionTaskHandle == NULL)) {
     Error_Handler();
   }
 
@@ -193,8 +184,7 @@ int main(void)
 
   /* We should never get here as control is now taken by the scheduler */
 
-  while (1)
-  {
+  while (1) {
   }
 }
 
@@ -202,8 +192,7 @@ int main(void)
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void)
-{
+void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -224,8 +213,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLN = 336;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = 4;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
     Error_Handler();
   }
 
@@ -238,8 +226,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
     Error_Handler();
   }
 }
@@ -249,8 +236,7 @@ void SystemClock_Config(void)
  * @param None
  * @retval None
  */
-static void MX_USART2_UART_Init(void)
-{
+static void MX_USART2_UART_Init(void) {
 
   /* USER CODE BEGIN USART2_Init 0 */
 
@@ -267,8 +253,7 @@ static void MX_USART2_UART_Init(void)
   huart2.Init.Mode = UART_MODE_TX_RX;
   huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
+  if (HAL_UART_Init(&huart2) != HAL_OK) {
     Error_Handler();
   }
   /* USER CODE BEGIN USART2_Init 2 */
@@ -281,8 +266,7 @@ static void MX_USART2_UART_Init(void)
  * @param None
  * @retval None
  */
-static void MX_I2C1_Init(void)
-{
+static void MX_I2C1_Init(void) {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -312,8 +296,7 @@ static void MX_I2C1_Init(void)
  * @param None
  * @retval None
  */
-static void MX_GPIO_Init(void)
-{
+static void MX_GPIO_Init(void) {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -347,24 +330,19 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static bool I2C1_Probe7bitAddress(uint8_t address_7bit)
-{
+static bool I2C1_Probe7bitAddress(uint8_t address_7bit) {
   uint32_t start_tick = HAL_GetTick();
 
-  while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U)
-  {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS)
-    {
+  while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U) {
+    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
       return false;
     }
   }
 
   I2C1->CR1 |= I2C_CR1_START;
   start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_SB) == 0U)
-  {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS)
-    {
+  while ((I2C1->SR1 & I2C_SR1_SB) == 0U) {
+    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
       I2C1->CR1 |= I2C_CR1_STOP;
       return false;
     }
@@ -372,17 +350,14 @@ static bool I2C1_Probe7bitAddress(uint8_t address_7bit)
 
   I2C1->DR = (uint8_t)(address_7bit << 1);
   start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & (I2C_SR1_ADDR | I2C_SR1_AF)) == 0U)
-  {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS)
-    {
+  while ((I2C1->SR1 & (I2C_SR1_ADDR | I2C_SR1_AF)) == 0U) {
+    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
       I2C1->CR1 |= I2C_CR1_STOP;
       return false;
     }
   }
 
-  if ((I2C1->SR1 & I2C_SR1_AF) != 0U)
-  {
+  if ((I2C1->SR1 & I2C_SR1_AF) != 0U) {
     I2C1->SR1 &= ~I2C_SR1_AF;
     I2C1->CR1 |= I2C_CR1_STOP;
     return false;
@@ -394,22 +369,17 @@ static bool I2C1_Probe7bitAddress(uint8_t address_7bit)
   return true;
 }
 
-static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count)
-{
+static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count) {
   uint32_t idx = 0U;
   uint32_t retry = 0U;
 
-  if ((addresses == NULL) || (count == 0U))
-  {
+  if ((addresses == NULL) || (count == 0U)) {
     return false;
   }
 
-  for (idx = 0U; idx < count; idx++)
-  {
-    for (retry = 0U; retry < I2C1_PROBE_RETRIES; retry++)
-    {
-      if (I2C1_Probe7bitAddress(addresses[idx]))
-      {
+  for (idx = 0U; idx < count; idx++) {
+    for (retry = 0U; retry < I2C1_PROBE_RETRIES; retry++) {
+      if (I2C1_Probe7bitAddress(addresses[idx])) {
         return true;
       }
       HAL_Delay(2U);
@@ -428,13 +398,11 @@ static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count)
  * @retval None
  */
 /* USER CODE END Header_StartBlinkTask */
-void StartBlinkTask(void *argument)
-{
+void StartBlinkTask(void *argument) {
   /* USER CODE BEGIN 5 */
   (void)argument;
   /* Infinite loop */
-  for (;;)
-  {
+  for (;;) {
     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     osDelay(500);
   }
@@ -448,17 +416,13 @@ void StartBlinkTask(void *argument)
  * @retval None
  */
 /* USER CODE END Header_StartImuTask */
-void StartImuTask(void *argument)
-{
+void StartImuTask(void *argument) {
   ImuSample sample = {0};
   (void)argument;
 
-  for (;;)
-  {
-    if (MPU6050_ReadGyroAccel(&sample))
-    {
-      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK)
-      {
+  for (;;) {
+    if (MPU6050_ReadGyroAccel(&sample)) {
+      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_latest_imu = sample;
         g_has_imu_sample = true;
         osMutexRelease(appDataMutexHandle);
@@ -475,17 +439,13 @@ void StartImuTask(void *argument)
  * @retval None
  */
 /* USER CODE END Header_StartTempTask */
-void StartTempTask(void *argument)
-{
+void StartTempTask(void *argument) {
   Bmp280Sample sample = {0};
   (void)argument;
 
-  for (;;)
-  {
-    if (BMP280_ReadTemperaturePressure(&sample))
-    {
-      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK)
-      {
+  for (;;) {
+    if (BMP280_ReadTemperaturePressure(&sample)) {
+      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_latest_bmp280 = sample;
         g_has_bmp280_sample = true;
         osMutexRelease(appDataMutexHandle);
@@ -502,22 +462,18 @@ void StartTempTask(void *argument)
  * @retval None
  */
 /* USER CODE END Header_StartFusionTask */
-void StartFusionTask(void *argument)
-{
+void StartFusionTask(void *argument) {
   ImuSample imu_sample = {0};
   Bmp280Sample bmp280_sample = {0};
   FusionState fusion_state = {0};
   bool have_samples = false;
   (void)argument;
 
-  for (;;)
-  {
+  for (;;) {
     have_samples = false;
 
-    if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK)
-    {
-      if (g_has_imu_sample && g_has_bmp280_sample)
-      {
+    if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
+      if (g_has_imu_sample && g_has_bmp280_sample) {
         imu_sample = g_latest_imu;
         bmp280_sample = g_latest_bmp280;
         fusion_state = g_fusion_state;
@@ -526,10 +482,9 @@ void StartFusionTask(void *argument)
       osMutexRelease(appDataMutexHandle);
     }
 
-    if (have_samples && Fusion_Update(&imu_sample, &bmp280_sample, &fusion_state))
-    {
-      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK)
-      {
+    if (have_samples &&
+        Fusion_Update(&imu_sample, &bmp280_sample, &fusion_state)) {
+      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_fusion_state = fusion_state;
         osMutexRelease(appDataMutexHandle);
       }
@@ -547,13 +502,11 @@ void StartFusionTask(void *argument)
  * @param  htim : TIM handle
  * @retval None
  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM1)
-  {
+  if (htim->Instance == TIM1) {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
@@ -565,13 +518,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
-void Error_Handler(void)
-{
+void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
+  while (1) {
   }
   /* USER CODE END Error_Handler_Debug */
 }
@@ -583,8 +534,7 @@ void Error_Handler(void)
  * @param  line: assert_param error line source number
  * @retval None
  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
+void assert_failed(uint8_t *file, uint32_t line) {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
      number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
