@@ -58,36 +58,38 @@ UART_HandleTypeDef huart2;
 /* Definitions for blinkTask */
 osThreadId_t blinkTaskHandle;
 const osThreadAttr_t blinkTask_attributes = {
-    .name = "blinkTask",
-    .stack_size = 128 * 4,
-    .priority = (osPriority_t)osPriorityNormal,
+  .name = "blinkTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t)osPriorityNormal,
 };
 /* Definitions for imuTask */
 osThreadId_t imuTaskHandle;
 const osThreadAttr_t imuTask_attributes = {
-    .name = "imuTask",
-    .stack_size = 256 * 4,
-    .priority = (osPriority_t)osPriorityAboveNormal,
+  .name = "imuTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t)osPriorityAboveNormal,
 };
 /* Definitions for tempTask */
 osThreadId_t tempTaskHandle;
 const osThreadAttr_t tempTask_attributes = {
-    .name = "tempTask",
-    .stack_size = 256 * 4,
-    .priority = (osPriority_t)osPriorityNormal,
+  .name = "tempTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t)osPriorityNormal,
 };
 /* Definitions for fusionTask */
 osThreadId_t fusionTaskHandle;
 const osThreadAttr_t fusionTask_attributes = {
-    .name = "fusionTask",
-    .stack_size = 256 * 4,
-    .priority = (osPriority_t)osPriorityAboveNormal,
+  .name = "fusionTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t)osPriorityAboveNormal,
 };
 /* USER CODE BEGIN PV */
 osMutexId_t appDataMutexHandle;
 const osMutexAttr_t appDataMutex_attributes = {
-    .name = "appDataMutex",
+  .name = "appDataMutex",
 };
+static const char *g_error_message = "ERR: unknown\r\n";
+static char g_error_buf[64];
 
 ImuSample g_latest_imu = {0};
 Bmp280Sample g_latest_bmp280 = {0};
@@ -95,8 +97,8 @@ FusionState g_fusion_state = {0};
 bool g_has_imu_sample = false;
 bool g_has_bmp280_sample = false;
 uint32_t g_app_status_flags =
-    APP_STATUS_FLAG_PLACEHOLDER_DATA | APP_STATUS_FLAG_MPU6050_WIP |
-    APP_STATUS_FLAG_BMP280_WIP | APP_STATUS_FLAG_FUSION_WIP;
+  APP_STATUS_FLAG_PLACEHOLDER_DATA | APP_STATUS_FLAG_MPU6050_WIP |
+  APP_STATUS_FLAG_BMP280_WIP | APP_STATUS_FLAG_FUSION_WIP;
 
 /* USER CODE END PV */
 
@@ -113,6 +115,7 @@ void StartFusionTask(void *argument);
 /* USER CODE BEGIN PFP */
 static bool I2C1_Probe7bitAddress(uint8_t address_7bit);
 static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count);
+extern int snprintf(char *str, unsigned int size, const char *format, ...);
 
 /* USER CODE END PFP */
 
@@ -125,7 +128,8 @@ static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count);
  * @brief  The application entry point.
  * @retval int
  */
-int main(void) {
+int main(void)
+{
 
   HAL_Init();
 
@@ -142,43 +146,59 @@ int main(void) {
   MX_USART2_UART_Init();
 
   osKernelInitialize();
+  (void)HAL_UART_Transmit(&huart2, (uint8_t *)"Hello, world!\r\n", 14, 50U);
 
   appDataMutexHandle = osMutexNew(&appDataMutex_attributes);
   if (appDataMutexHandle == NULL) {
+    g_error_message = "ERR: mutex create failed\r\n";
     Error_Handler();
   }
 
   if (!I2C1_ProbeKnownAddresses(
-          (const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1}, 2U)) {
+        (const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1}, 2U
+      ))
+  {
+    g_error_message = "ERR: MPU6050 probe failed\r\n";
     Error_Handler();
   }
 
-  if (!I2C1_ProbeKnownAddresses((const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1},
-                                2U)) {
-    Error_Handler();
-  }
+  // if (!I2C1_ProbeKnownAddresses(
+  //       (const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1}, 2U
+  //     ))
+  // {
+  //   g_error_message = "ERR: BMP280 probe failed\r\n";
+  //   Error_Handler();
+  // }
 
   if (!MPU6050_Init()) {
+    int n = snprintf(
+      g_error_buf,
+      sizeof(g_error_buf),
+      "ERR: MPU6050 init err=0x%02X reg=0x%02X who=0x%02X\r\n",
+      MPU6050_GetLastError(),
+      MPU6050_GetLastFailedRegister(),
+      MPU6050_GetLastWhoAmI()
+    );
+    if (n > 0 && n <= (int)sizeof(g_error_buf)) {
+      g_error_message = g_error_buf;
+    }
     Error_Handler();
   }
 
-  if (!BMP280_Init()) {
-    Error_Handler();
-  }
+  // if (!BMP280_Init()) {
+  //   Error_Handler();
+  // }
 
-  if (!Fusion_Init(&g_fusion_state)) {
-    Error_Handler();
-  }
+  // if (!Fusion_Init(&g_fusion_state)) {
+  //   Error_Handler();
+  // }
 
   blinkTaskHandle = osThreadNew(StartBlinkTask, NULL, &blinkTask_attributes);
   imuTaskHandle = osThreadNew(StartImuTask, NULL, &imuTask_attributes);
-  tempTaskHandle = osThreadNew(StartTempTask, NULL, &tempTask_attributes);
-  fusionTaskHandle = osThreadNew(StartFusionTask, NULL, &fusionTask_attributes);
 
-  if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL) ||
-      (tempTaskHandle == NULL) || (fusionTaskHandle == NULL)) {
-    Error_Handler();
-  }
+  // if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL)) {
+  //   Error_Handler();
+  // }
 
   osKernelStart();
 
@@ -192,7 +212,8 @@ int main(void) {
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void) {
+void SystemClock_Config(void)
+{
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -236,7 +257,8 @@ void SystemClock_Config(void) {
  * @param None
  * @retval None
  */
-static void MX_USART2_UART_Init(void) {
+static void MX_USART2_UART_Init(void)
+{
 
   /* USER CODE BEGIN USART2_Init 0 */
 
@@ -266,7 +288,8 @@ static void MX_USART2_UART_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_I2C1_Init(void) {
+static void MX_I2C1_Init(void)
+{
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -296,7 +319,8 @@ static void MX_I2C1_Init(void) {
  * @param None
  * @retval None
  */
-static void MX_GPIO_Init(void) {
+static void MX_GPIO_Init(void)
+{
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -330,7 +354,8 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
-static bool I2C1_Probe7bitAddress(uint8_t address_7bit) {
+static bool I2C1_Probe7bitAddress(uint8_t address_7bit)
+{
   uint32_t start_tick = HAL_GetTick();
 
   while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U) {
@@ -369,7 +394,8 @@ static bool I2C1_Probe7bitAddress(uint8_t address_7bit) {
   return true;
 }
 
-static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count) {
+static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count)
+{
   uint32_t idx = 0U;
   uint32_t retry = 0U;
 
@@ -398,7 +424,8 @@ static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count) {
  * @retval None
  */
 /* USER CODE END Header_StartBlinkTask */
-void StartBlinkTask(void *argument) {
+void StartBlinkTask(void *argument)
+{
   /* USER CODE BEGIN 5 */
   (void)argument;
   /* Infinite loop */
@@ -416,9 +443,13 @@ void StartBlinkTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartImuTask */
-void StartImuTask(void *argument) {
+void StartImuTask(void *argument)
+{
   ImuSample sample = {0};
   (void)argument;
+
+  // log string "IMU task started"
+  (void)HAL_UART_Transmit(&huart2, (uint8_t *)"IMU task started\r\n", 20, 50U);
 
   for (;;) {
     if (MPU6050_ReadGyroAccel(&sample)) {
@@ -428,7 +459,38 @@ void StartImuTask(void *argument) {
         osMutexRelease(appDataMutexHandle);
       }
     }
-    osDelay(IMU_TASK_PERIOD_MS);
+    /* %f is disabled in newlib nano snprintf — convert to integer centi-units
+     */
+    char msg[120];
+    int ax = (int)(sample.accel_mps2[0] * 100.0f);
+    int ay = (int)(sample.accel_mps2[1] * 100.0f);
+    int az = (int)(sample.accel_mps2[2] * 100.0f);
+    int gx = (int)(sample.gyro_dps[0] * 100.0f);
+    int gy = (int)(sample.gyro_dps[1] * 100.0f);
+    int gz = (int)(sample.gyro_dps[2] * 100.0f);
+    int len = snprintf(
+      msg,
+      sizeof(msg),
+      "t=%lu ax=%d.%02d ay=%d.%02d az=%d.%02d gx=%d.%02d gy=%d.%02d "
+      "gz=%d.%02d\r\n",
+      (unsigned long)sample.timestamp_ms,
+      ax / 100,
+      (ax < 0 ? -ax : ax) % 100,
+      ay / 100,
+      (ay < 0 ? -ay : ay) % 100,
+      az / 100,
+      (az < 0 ? -az : az) % 100,
+      gx / 100,
+      (gx < 0 ? -gx : gx) % 100,
+      gy / 100,
+      (gy < 0 ? -gy : gy) % 100,
+      gz / 100,
+      (gz < 0 ? -gz : gz) % 100
+    );
+    if (len > 0 && len <= (int)sizeof(msg)) {
+      (void)HAL_UART_Transmit(&huart2, (uint8_t *)msg, (uint16_t)len, 50U);
+    }
+    osDelay(500);
   }
 }
 
@@ -439,7 +501,8 @@ void StartImuTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartTempTask */
-void StartTempTask(void *argument) {
+void StartTempTask(void *argument)
+{
   Bmp280Sample sample = {0};
   (void)argument;
 
@@ -462,7 +525,8 @@ void StartTempTask(void *argument) {
  * @retval None
  */
 /* USER CODE END Header_StartFusionTask */
-void StartFusionTask(void *argument) {
+void StartFusionTask(void *argument)
+{
   ImuSample imu_sample = {0};
   Bmp280Sample bmp280_sample = {0};
   FusionState fusion_state = {0};
@@ -483,7 +547,8 @@ void StartFusionTask(void *argument) {
     }
 
     if (have_samples &&
-        Fusion_Update(&imu_sample, &bmp280_sample, &fusion_state)) {
+        Fusion_Update(&imu_sample, &bmp280_sample, &fusion_state))
+    {
       if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_fusion_state = fusion_state;
         osMutexRelease(appDataMutexHandle);
@@ -502,7 +567,8 @@ void StartFusionTask(void *argument) {
  * @param  htim : TIM handle
  * @retval None
  */
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
@@ -518,9 +584,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
-void Error_Handler(void) {
+void Error_Handler(void)
+{
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  if (g_error_message != NULL) {
+    uint16_t len = 0U;
+    while (g_error_message[len] != '\0') {
+      len++;
+    }
+    (void)HAL_UART_Transmit(&huart2, (uint8_t *)g_error_message, len, 50U);
+  }
   __disable_irq();
   while (1) {
   }
@@ -534,7 +608,8 @@ void Error_Handler(void) {
  * @param  line: assert_param error line source number
  * @retval None
  */
-void assert_failed(uint8_t *file, uint32_t line) {
+void assert_failed(uint8_t *file, uint32_t line)
+{
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
      number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,

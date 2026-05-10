@@ -1,0 +1,20 @@
+BasedOnStyle: LLVM
+Language: Cpp
+
+IndentWidth: 2
+ContinuationIndentWidth: 2
+UseTab: Never
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: MultiLine
+  BeforeElse: true
+  BeforeCatch: true
+
+# Keep short signatures on one line; wrap long ones to a vertical list.
+ColumnLimit: 80
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: BlockIndent
+PenaltyBreakBeforeFirstCallParameter: 0
