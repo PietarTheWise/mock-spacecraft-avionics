@@ -162,14 +162,6 @@ int main(void)
     Error_Handler();
   }
 
-  // if (!I2C1_ProbeKnownAddresses(
-  //       (const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1}, 2U
-  //     ))
-  // {
-  //   g_error_message = "ERR: BMP280 probe failed\r\n";
-  //   Error_Handler();
-  // }
-
   if (!MPU6050_Init()) {
     int n = snprintf(
       g_error_buf,
@@ -185,9 +177,10 @@ int main(void)
     Error_Handler();
   }
 
-  // if (!BMP280_Init()) {
-  //   Error_Handler();
-  // }
+  /* BMP280 init is deferred to tempTask — probing here uses HAL_Delay which
+   * can stall after osKernelInitialize(). tempTask will attempt init once the
+   * scheduler is running and timing is reliable. */
+  g_app_status_flags |= APP_STATUS_FLAG_BMP280_WIP;
 
   // if (!Fusion_Init(&g_fusion_state)) {
   //   Error_Handler();
@@ -195,10 +188,14 @@ int main(void)
 
   blinkTaskHandle = osThreadNew(StartBlinkTask, NULL, &blinkTask_attributes);
   imuTaskHandle = osThreadNew(StartImuTask, NULL, &imuTask_attributes);
+  tempTaskHandle = osThreadNew(StartTempTask, NULL, &tempTask_attributes);
 
-  // if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL)) {
-  //   Error_Handler();
-  // }
+  if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL) ||
+      (tempTaskHandle == NULL))
+  {
+    g_error_message = "ERR: task create failed\r\n";
+    Error_Handler();
+  }
 
   osKernelStart();
 
@@ -504,14 +501,57 @@ void StartImuTask(void *argument)
 void StartTempTask(void *argument)
 {
   Bmp280Sample sample = {0};
+  uint32_t print_counter = 0U;
+  bool bmp280_ready = false;
   (void)argument;
 
+  /* Defer BMP280 probe + init to here so HAL_GetTick() is reliable (kernel
+   * is running). Try once; if it fails the task idles silently. */
+  osDelay(50U);  /* brief settle after kernel start */
+  if (I2C1_ProbeKnownAddresses(
+        (const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1}, 2U
+      ))
+  {
+    if (BMP280_Init()) {
+      g_app_status_flags &= ~APP_STATUS_FLAG_BMP280_WIP;
+      bmp280_ready = true;
+    }
+  }
+
   for (;;) {
+    if (!bmp280_ready) {
+      osDelay(TEMP_TASK_PERIOD_MS);
+      continue;
+    }
+
     if (BMP280_ReadTemperaturePressure(&sample)) {
       if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_latest_bmp280 = sample;
         g_has_bmp280_sample = true;
         osMutexRelease(appDataMutexHandle);
+      }
+
+      /* Print every 10 reads (~1 s at 100 ms period) */
+      print_counter++;
+      if ((print_counter % 10U) == 0U) {
+        char msg[80];
+        /* %f disabled in newlib nano — convert to integer centi-units */
+        int temp_c = (int)(sample.temperature_c * 100.0f);
+        int press_hpa = (int)(sample.pressure_hpa * 100.0f);
+        int len = snprintf(
+          msg,
+          sizeof(msg),
+          "BMP t=%lu temp=%d.%02d hpa=%d.%02d ph=%u\r\n",
+          (unsigned long)sample.timestamp_ms,
+          temp_c / 100,
+          (temp_c < 0 ? -temp_c : temp_c) % 100,
+          press_hpa / 100,
+          (press_hpa < 0 ? -press_hpa : press_hpa) % 100,
+          sample.is_placeholder ? 1U : 0U
+        );
+        if (len > 0 && len <= (int)sizeof(msg)) {
+          (void)HAL_UART_Transmit(&huart2, (uint8_t *)msg, (uint16_t)len, 50U);
+        }
       }
     }
     osDelay(TEMP_TASK_PERIOD_MS);
