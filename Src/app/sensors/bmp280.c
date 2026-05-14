@@ -1,4 +1,5 @@
 #include "app/sensors/bmp280.h"
+#include "app/common/i2c_utils.h"
 #include "stm32f4xx_hal.h"
 
 /* ---- I2C addresses (SDO pin selects) ------------------------------------ */
@@ -71,42 +72,24 @@ static void BMP280_SetError(uint8_t error_code, uint8_t reg)
 }
 
 /* =========================================================================
- * Low-level I2C primitives (same pattern as mpu6050.c)
+ * Low-level I2C primitives
  * ========================================================================= */
-
-static bool BMP280_I2CWaitIdle(void)
-{
-  uint32_t start_tick = HAL_GetTick();
-  while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      BMP280_SetError(BMP280_ERR_I2C_BUSY_TIMEOUT, 0x00U);
-      return false;
-    }
-  }
-  return true;
-}
 
 static bool BMP280_I2CStartAndAddress(uint8_t addr_7bit, bool read_direction)
 {
-  uint32_t start_tick = HAL_GetTick();
   I2C1->CR1 |= I2C_CR1_START;
 
-  while ((I2C1->SR1 & I2C_SR1_SB) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_START_ADDR_TIMEOUT, 0x00U);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_SB, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_START_ADDR_TIMEOUT, 0x00U);
+    return false;
   }
 
   I2C1->DR = (uint8_t)((addr_7bit << 1) | (read_direction ? 1U : 0U));
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & (I2C_SR1_ADDR | I2C_SR1_AF)) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_START_ADDR_TIMEOUT, 0x00U);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_ADDR | I2C_SR1_AF, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_START_ADDR_TIMEOUT, 0x00U);
+    return false;
   }
 
   if ((I2C1->SR1 & I2C_SR1_AF) != 0U) {
@@ -121,12 +104,11 @@ static bool BMP280_I2CStartAndAddress(uint8_t addr_7bit, bool read_direction)
 
 static bool BMP280_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
 {
-  uint32_t start_tick = 0U;
-
   if (value == NULL) {
     return false;
   }
-  if (!BMP280_I2CWaitIdle()) {
+  if (!I2C1_WaitIdle(BMP280_I2C_TIMEOUT_MS)) {
+    BMP280_SetError(BMP280_ERR_I2C_BUSY_TIMEOUT, 0x00U);
     return false;
   }
   if (!BMP280_I2CStartAndAddress(addr_7bit, false)) {
@@ -136,23 +118,18 @@ static bool BMP280_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
   (void)I2C1->SR1;
   (void)I2C1->SR2;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
+
   I2C1->DR = reg;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_BTF) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_BTF_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_BTF, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_BTF_TIMEOUT, reg);
+    return false;
   }
 
   if (!BMP280_I2CStartAndAddress(addr_7bit, true)) {
@@ -164,13 +141,10 @@ static bool BMP280_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
   (void)I2C1->SR2;
   I2C1->CR1 |= I2C_CR1_STOP;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_RXNE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_ACK;
-      BMP280_SetError(BMP280_ERR_RXNE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_RXNE, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_ACK;
+    BMP280_SetError(BMP280_ERR_RXNE_TIMEOUT, reg);
+    return false;
   }
 
   *value = (uint8_t)I2C1->DR;
@@ -180,9 +154,8 @@ static bool BMP280_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
 
 static bool BMP280_WriteReg8(uint8_t addr_7bit, uint8_t reg, uint8_t value)
 {
-  uint32_t start_tick = 0U;
-
-  if (!BMP280_I2CWaitIdle()) {
+  if (!I2C1_WaitIdle(BMP280_I2C_TIMEOUT_MS)) {
+    BMP280_SetError(BMP280_ERR_I2C_BUSY_TIMEOUT, 0x00U);
     return false;
   }
   if (!BMP280_I2CStartAndAddress(addr_7bit, false)) {
@@ -192,45 +165,31 @@ static bool BMP280_WriteReg8(uint8_t addr_7bit, uint8_t reg, uint8_t value)
   (void)I2C1->SR1;
   (void)I2C1->SR2;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
   I2C1->DR = reg;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
   I2C1->DR = value;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_BTF) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= BMP280_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      BMP280_SetError(BMP280_ERR_BTF_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_BTF, BMP280_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    BMP280_SetError(BMP280_ERR_BTF_TIMEOUT, reg);
+    return false;
   }
 
   I2C1->CR1 |= I2C_CR1_STOP;
   return true;
 }
 
-static bool BMP280_ReadBurst(
-  uint8_t addr_7bit,
-  uint8_t start_reg,
-  uint8_t *buffer,
-  uint32_t length
-)
+static bool BMP280_ReadBurst(uint8_t addr_7bit, uint8_t start_reg, uint8_t *buffer, uint32_t length)
 {
   uint32_t index = 0U;
 
@@ -239,10 +198,7 @@ static bool BMP280_ReadBurst(
   }
 
   for (index = 0U; index < length; index++) {
-    if (!BMP280_ReadReg8(
-          addr_7bit, (uint8_t)(start_reg + index), &buffer[index]
-        ))
-    {
+    if (!BMP280_ReadReg8(addr_7bit, (uint8_t)(start_reg + index), &buffer[index])) {
       BMP280_SetError(BMP280_ERR_BURST_READ_FAIL, (uint8_t)(start_reg + index));
       return false;
     }
@@ -284,10 +240,7 @@ static bool BMP280_ReadCalibration(void)
 {
   uint8_t raw[BMP280_CALIB_BYTES] = {0};
 
-  if (!BMP280_ReadBurst(
-        s_bmp280_addr, BMP280_REG_CALIB_START, raw, BMP280_CALIB_BYTES
-      ))
-  {
+  if (!BMP280_ReadBurst(s_bmp280_addr, BMP280_REG_CALIB_START, raw, BMP280_CALIB_BYTES)) {
     BMP280_SetError(BMP280_ERR_CALIB_READ_FAIL, BMP280_REG_CALIB_START);
     return false;
   }
@@ -323,14 +276,12 @@ static int32_t BMP280_CompensateTemp(int32_t adc_T)
   int32_t var1 = 0;
   int32_t var2 = 0;
 
-  var1 = ((((adc_T >> 3) - ((int32_t)s_calib.dig_T1 << 1))) *
-          ((int32_t)s_calib.dig_T2)) >>
-         11;
-  var2 = ((((adc_T >> 4) - ((int32_t)s_calib.dig_T1)) *
-           ((adc_T >> 4) - ((int32_t)s_calib.dig_T1))) >>
-          12) *
-           ((int32_t)s_calib.dig_T3) >>
-         14;
+  var1 = ((((adc_T >> 3) - ((int32_t)s_calib.dig_T1 << 1))) * ((int32_t)s_calib.dig_T2)) >> 11;
+  var2 =
+    ((((adc_T >> 4) - ((int32_t)s_calib.dig_T1)) * ((adc_T >> 4) - ((int32_t)s_calib.dig_T1))) >> 12
+    ) *
+      ((int32_t)s_calib.dig_T3) >>
+    14;
   s_t_fine = var1 + var2;
   return (s_t_fine * 5 + 128) >> 8;
 }
@@ -350,8 +301,7 @@ static uint32_t BMP280_CompensatePressure(int32_t adc_P)
   var2 = var1 * var1 * (int64_t)s_calib.dig_P6;
   var2 = var2 + ((var1 * (int64_t)s_calib.dig_P5) << 17);
   var2 = var2 + (((int64_t)s_calib.dig_P4) << 35);
-  var1 = ((var1 * var1 * (int64_t)s_calib.dig_P3) >> 8) +
-         ((var1 * (int64_t)s_calib.dig_P2) << 12);
+  var1 = ((var1 * var1 * (int64_t)s_calib.dig_P3) >> 8) + ((var1 * (int64_t)s_calib.dig_P2) << 12);
   var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)s_calib.dig_P1) >> 33;
 
   if (var1 == 0) {
@@ -388,16 +338,12 @@ bool BMP280_Init(void)
     return false;
   }
 
-  if (!BMP280_WriteReg8(
-        s_bmp280_addr, BMP280_REG_CTRL_MEAS, BMP280_CTRL_MEAS_VALUE
-      ))
-  {
+  if (!BMP280_WriteReg8(s_bmp280_addr, BMP280_REG_CTRL_MEAS, BMP280_CTRL_MEAS_VALUE)) {
     BMP280_SetError(BMP280_ERR_INIT_CONFIG_FAIL, BMP280_REG_CTRL_MEAS);
     return false;
   }
 
-  if (!BMP280_WriteReg8(s_bmp280_addr, BMP280_REG_CONFIG, BMP280_CONFIG_VALUE))
-  {
+  if (!BMP280_WriteReg8(s_bmp280_addr, BMP280_REG_CONFIG, BMP280_CONFIG_VALUE)) {
     BMP280_SetError(BMP280_ERR_INIT_CONFIG_FAIL, BMP280_REG_CONFIG);
     return false;
   }
@@ -429,17 +375,12 @@ bool BMP280_ReadTemperaturePressure(Bmp280Sample *sample)
    *   raw[3..5] = temp_msb,  temp_lsb,  temp_xlsb
    * Each raw value is 20-bit, big-endian, with 4-bit zero-padding in xlsb[3:0].
    */
-  if (!BMP280_ReadBurst(
-        s_bmp280_addr, BMP280_REG_PRESS_MSB, raw, BMP280_DATA_BYTES
-      ))
-  {
+  if (!BMP280_ReadBurst(s_bmp280_addr, BMP280_REG_PRESS_MSB, raw, BMP280_DATA_BYTES)) {
     return false;
   }
 
-  adc_P = (int32_t)(((uint32_t)raw[0] << 12) | ((uint32_t)raw[1] << 4) |
-                    ((uint32_t)raw[2] >> 4));
-  adc_T = (int32_t)(((uint32_t)raw[3] << 12) | ((uint32_t)raw[4] << 4) |
-                    ((uint32_t)raw[5] >> 4));
+  adc_P = (int32_t)(((uint32_t)raw[0] << 12) | ((uint32_t)raw[1] << 4) | ((uint32_t)raw[2] >> 4));
+  adc_T = (int32_t)(((uint32_t)raw[3] << 12) | ((uint32_t)raw[4] << 4) | ((uint32_t)raw[5] >> 4));
 
   /* Temperature must be compensated first — it populates s_t_fine for pressure
    */

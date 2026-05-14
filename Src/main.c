@@ -22,9 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app/common/i2c_utils.h"
 #include "app/fusion/fusion.h"
 #include "app/sensors/bmp280.h"
 #include "app/sensors/mpu6050.h"
+#include "app/telemetry/telemetry.h"
 
 /* USER CODE END Includes */
 
@@ -35,11 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define IMU_TASK_PERIOD_MS (10U)
 #define TEMP_TASK_PERIOD_MS (100U)
-#define FUSION_TASK_PERIOD_MS (10U)
-#define I2C1_PROBE_TIMEOUT_MS (10U)
-#define I2C1_PROBE_RETRIES (5U)
 #define MPU6050_ADDR_0 (0x68U)
 #define MPU6050_ADDR_1 (0x69U)
 #define BMP280_ADDR_0 (0x76U)
@@ -76,13 +74,6 @@ const osThreadAttr_t tempTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t)osPriorityNormal,
 };
-/* Definitions for fusionTask */
-osThreadId_t fusionTaskHandle;
-const osThreadAttr_t fusionTask_attributes = {
-  .name = "fusionTask",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t)osPriorityAboveNormal,
-};
 /* USER CODE BEGIN PV */
 osMutexId_t appDataMutexHandle;
 const osMutexAttr_t appDataMutex_attributes = {
@@ -93,14 +84,8 @@ static char g_error_buf[64];
 
 ImuSample g_latest_imu = {0};
 Bmp280Sample g_latest_bmp280 = {0};
-FusionState g_fusion_state = {0};
-bool g_has_imu_sample = false;
-bool g_has_bmp280_sample = false;
 uint32_t g_app_status_flags =
-  APP_STATUS_FLAG_PLACEHOLDER_DATA | APP_STATUS_FLAG_MPU6050_WIP |
-  APP_STATUS_FLAG_BMP280_WIP | APP_STATUS_FLAG_FUSION_WIP;
-
-/* USER CODE END PV */
+  APP_STATUS_FLAG_PLACEHOLDER_DATA | APP_STATUS_FLAG_MPU6050_WIP | APP_STATUS_FLAG_BMP280_WIP;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -110,19 +95,9 @@ static void MX_USART2_UART_Init(void);
 void StartBlinkTask(void *argument);
 void StartImuTask(void *argument);
 void StartTempTask(void *argument);
-void StartFusionTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-static bool I2C1_Probe7bitAddress(uint8_t address_7bit);
-static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count);
 extern int snprintf(char *str, unsigned int size, const char *format, ...);
-
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
 
 /**
  * @brief  The application entry point.
@@ -133,20 +108,15 @@ int main(void)
 
   HAL_Init();
 
-  /* Configure the system clock */
   SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
 
   osKernelInitialize();
-  (void)HAL_UART_Transmit(&huart2, (uint8_t *)"Hello, world!\r\n", 14, 50U);
+  Telemetry_Init(&huart2);
+  Telemetry_SendString("Hello, world!\r\n");
 
   appDataMutexHandle = osMutexNew(&appDataMutex_attributes);
   if (appDataMutexHandle == NULL) {
@@ -154,10 +124,7 @@ int main(void)
     Error_Handler();
   }
 
-  if (!I2C1_ProbeKnownAddresses(
-        (const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1}, 2U
-      ))
-  {
+  if (!I2C1_ProbeKnownAddresses((const uint8_t[]){MPU6050_ADDR_0, MPU6050_ADDR_1}, 2U)) {
     g_error_message = "ERR: MPU6050 probe failed\r\n";
     Error_Handler();
   }
@@ -177,22 +144,13 @@ int main(void)
     Error_Handler();
   }
 
-  /* BMP280 init is deferred to tempTask — probing here uses HAL_Delay which
-   * can stall after osKernelInitialize(). tempTask will attempt init once the
-   * scheduler is running and timing is reliable. */
   g_app_status_flags |= APP_STATUS_FLAG_BMP280_WIP;
-
-  // if (!Fusion_Init(&g_fusion_state)) {
-  //   Error_Handler();
-  // }
 
   blinkTaskHandle = osThreadNew(StartBlinkTask, NULL, &blinkTask_attributes);
   imuTaskHandle = osThreadNew(StartImuTask, NULL, &imuTask_attributes);
   tempTaskHandle = osThreadNew(StartTempTask, NULL, &tempTask_attributes);
 
-  if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL) ||
-      (tempTaskHandle == NULL))
-  {
+  if ((blinkTaskHandle == NULL) || (imuTaskHandle == NULL) || (tempTaskHandle == NULL)) {
     g_error_message = "ERR: task create failed\r\n";
     Error_Handler();
   }
@@ -237,8 +195,8 @@ void SystemClock_Config(void)
 
   /** Initializes the CPU, AHB and APB buses clocks
    */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
-                                RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.ClockType =
+    RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
@@ -257,13 +215,6 @@ void SystemClock_Config(void)
 static void MX_USART2_UART_Init(void)
 {
 
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
@@ -275,9 +226,6 @@ static void MX_USART2_UART_Init(void)
   if (HAL_UART_Init(&huart2) != HAL_OK) {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
 }
 
 /**
@@ -351,66 +299,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static bool I2C1_Probe7bitAddress(uint8_t address_7bit)
-{
-  uint32_t start_tick = HAL_GetTick();
-
-  while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U) {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
-      return false;
-    }
-  }
-
-  I2C1->CR1 |= I2C_CR1_START;
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_SB) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      return false;
-    }
-  }
-
-  I2C1->DR = (uint8_t)(address_7bit << 1);
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & (I2C_SR1_ADDR | I2C_SR1_AF)) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= I2C1_PROBE_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      return false;
-    }
-  }
-
-  if ((I2C1->SR1 & I2C_SR1_AF) != 0U) {
-    I2C1->SR1 &= ~I2C_SR1_AF;
-    I2C1->CR1 |= I2C_CR1_STOP;
-    return false;
-  }
-
-  (void)I2C1->SR1;
-  (void)I2C1->SR2;
-  I2C1->CR1 |= I2C_CR1_STOP;
-  return true;
-}
-
-static bool I2C1_ProbeKnownAddresses(const uint8_t *addresses, uint32_t count)
-{
-  uint32_t idx = 0U;
-  uint32_t retry = 0U;
-
-  if ((addresses == NULL) || (count == 0U)) {
-    return false;
-  }
-
-  for (idx = 0U; idx < count; idx++) {
-    for (retry = 0U; retry < I2C1_PROBE_RETRIES; retry++) {
-      if (I2C1_Probe7bitAddress(addresses[idx])) {
-        return true;
-      }
-      HAL_Delay(2U);
-    }
-  }
-
-  return false;
-}
 
 /* USER CODE END 4 */
 
@@ -445,48 +333,16 @@ void StartImuTask(void *argument)
   ImuSample sample = {0};
   (void)argument;
 
-  // log string "IMU task started"
-  (void)HAL_UART_Transmit(&huart2, (uint8_t *)"IMU task started\r\n", 20, 50U);
+  Telemetry_SendString("IMU task started\r\n");
 
   for (;;) {
     if (MPU6050_ReadGyroAccel(&sample)) {
       if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_latest_imu = sample;
-        g_has_imu_sample = true;
         osMutexRelease(appDataMutexHandle);
       }
     }
-    /* %f is disabled in newlib nano snprintf — convert to integer centi-units
-     */
-    char msg[120];
-    int ax = (int)(sample.accel_mps2[0] * 100.0f);
-    int ay = (int)(sample.accel_mps2[1] * 100.0f);
-    int az = (int)(sample.accel_mps2[2] * 100.0f);
-    int gx = (int)(sample.gyro_dps[0] * 100.0f);
-    int gy = (int)(sample.gyro_dps[1] * 100.0f);
-    int gz = (int)(sample.gyro_dps[2] * 100.0f);
-    int len = snprintf(
-      msg,
-      sizeof(msg),
-      "t=%lu ax=%d.%02d ay=%d.%02d az=%d.%02d gx=%d.%02d gy=%d.%02d "
-      "gz=%d.%02d\r\n",
-      (unsigned long)sample.timestamp_ms,
-      ax / 100,
-      (ax < 0 ? -ax : ax) % 100,
-      ay / 100,
-      (ay < 0 ? -ay : ay) % 100,
-      az / 100,
-      (az < 0 ? -az : az) % 100,
-      gx / 100,
-      (gx < 0 ? -gx : gx) % 100,
-      gy / 100,
-      (gy < 0 ? -gy : gy) % 100,
-      gz / 100,
-      (gz < 0 ? -gz : gz) % 100
-    );
-    if (len > 0 && len <= (int)sizeof(msg)) {
-      (void)HAL_UART_Transmit(&huart2, (uint8_t *)msg, (uint16_t)len, 50U);
-    }
+    Telemetry_SendImuSample(&sample);
     osDelay(500);
   }
 }
@@ -507,11 +363,8 @@ void StartTempTask(void *argument)
 
   /* Defer BMP280 probe + init to here so HAL_GetTick() is reliable (kernel
    * is running). Try once; if it fails the task idles silently. */
-  osDelay(50U);  /* brief settle after kernel start */
-  if (I2C1_ProbeKnownAddresses(
-        (const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1}, 2U
-      ))
-  {
+  osDelay(50U); /* brief settle after kernel start */
+  if (I2C1_ProbeKnownAddresses((const uint8_t[]){BMP280_ADDR_0, BMP280_ADDR_1}, 2U)) {
     if (BMP280_Init()) {
       g_app_status_flags &= ~APP_STATUS_FLAG_BMP280_WIP;
       bmp280_ready = true;
@@ -527,75 +380,16 @@ void StartTempTask(void *argument)
     if (BMP280_ReadTemperaturePressure(&sample)) {
       if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
         g_latest_bmp280 = sample;
-        g_has_bmp280_sample = true;
         osMutexRelease(appDataMutexHandle);
       }
 
       /* Print every 10 reads (~1 s at 100 ms period) */
       print_counter++;
       if ((print_counter % 10U) == 0U) {
-        char msg[80];
-        /* %f disabled in newlib nano — convert to integer centi-units */
-        int temp_c = (int)(sample.temperature_c * 100.0f);
-        int press_hpa = (int)(sample.pressure_hpa * 100.0f);
-        int len = snprintf(
-          msg,
-          sizeof(msg),
-          "BMP t=%lu temp=%d.%02d hpa=%d.%02d ph=%u\r\n",
-          (unsigned long)sample.timestamp_ms,
-          temp_c / 100,
-          (temp_c < 0 ? -temp_c : temp_c) % 100,
-          press_hpa / 100,
-          (press_hpa < 0 ? -press_hpa : press_hpa) % 100,
-          sample.is_placeholder ? 1U : 0U
-        );
-        if (len > 0 && len <= (int)sizeof(msg)) {
-          (void)HAL_UART_Transmit(&huart2, (uint8_t *)msg, (uint16_t)len, 50U);
-        }
+        Telemetry_SendBmp280Sample(&sample);
       }
     }
     osDelay(TEMP_TASK_PERIOD_MS);
-  }
-}
-
-/* USER CODE BEGIN Header_StartFusionTask */
-/**
- * @brief Function implementing the fusionTask thread.
- * @param argument: Not used
- * @retval None
- */
-/* USER CODE END Header_StartFusionTask */
-void StartFusionTask(void *argument)
-{
-  ImuSample imu_sample = {0};
-  Bmp280Sample bmp280_sample = {0};
-  FusionState fusion_state = {0};
-  bool have_samples = false;
-  (void)argument;
-
-  for (;;) {
-    have_samples = false;
-
-    if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
-      if (g_has_imu_sample && g_has_bmp280_sample) {
-        imu_sample = g_latest_imu;
-        bmp280_sample = g_latest_bmp280;
-        fusion_state = g_fusion_state;
-        have_samples = true;
-      }
-      osMutexRelease(appDataMutexHandle);
-    }
-
-    if (have_samples &&
-        Fusion_Update(&imu_sample, &bmp280_sample, &fusion_state))
-    {
-      if (osMutexAcquire(appDataMutexHandle, osWaitForever) == osOK) {
-        g_fusion_state = fusion_state;
-        osMutexRelease(appDataMutexHandle);
-      }
-    }
-
-    osDelay(FUSION_TASK_PERIOD_MS);
   }
 }
 
@@ -609,15 +403,9 @@ void StartFusionTask(void *argument)
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  /* USER CODE BEGIN Callback 0 */
-
-  /* USER CODE END Callback 0 */
   if (htim->Instance == TIM1) {
     HAL_IncTick();
   }
-  /* USER CODE BEGIN Callback 1 */
-
-  /* USER CODE END Callback 1 */
 }
 
 /**
@@ -638,22 +426,4 @@ void Error_Handler(void)
   __disable_irq();
   while (1) {
   }
-  /* USER CODE END Error_Handler_Debug */
 }
-#ifdef USE_FULL_ASSERT
-/**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
-void assert_failed(uint8_t *file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line
-     number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
-     line) */
-  /* USER CODE END 6 */
-}
-#endif /* USE_FULL_ASSERT */

@@ -1,4 +1,5 @@
 #include "app/sensors/mpu6050.h"
+#include "app/common/i2c_utils.h"
 #include "stm32f4xx_hal.h"
 
 #define MPU6050_ADDR_0 (0x68U)
@@ -29,43 +30,25 @@ static void MPU6050_SetError(uint8_t error_code, uint8_t reg)
   s_mpu6050_last_failed_reg = reg;
 }
 
-static bool MPU6050_I2CWaitIdle(void)
-{
-  uint32_t start_tick = HAL_GetTick();
-  while ((I2C1->SR2 & I2C_SR2_BUSY) != 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      MPU6050_SetError(MPU6050_ERR_I2C_BUSY_TIMEOUT, 0x00U);
-      return false;
-    }
-  }
-  return true;
-}
-
 static bool MPU6050_I2CStartAndAddress(uint8_t addr_7bit, bool read_direction)
 {
-  uint32_t start_tick = HAL_GetTick();
   I2C1->CR1 |= I2C_CR1_START;
 
-  while ((I2C1->SR1 & I2C_SR1_SB) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_START_ADDR_TIMEOUT, 0x00U);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_SB, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_START_ADDR_TIMEOUT, 0x00U);
+    return false;
   }
 
   I2C1->DR = (uint8_t)((addr_7bit << 1) | (read_direction ? 1U : 0U));
-  start_tick = HAL_GetTick();
-  // if ADDR is set it is ACKed, if AF is set it is NACKed
-  while ((I2C1->SR1 & (I2C_SR1_ADDR | I2C_SR1_AF)) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_START_ADDR_TIMEOUT, 0x00U);
-      return false;
-    }
+  /* if ADDR is set it is ACKed, if AF is set it is NACKed */
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_ADDR | I2C_SR1_AF, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_START_ADDR_TIMEOUT, 0x00U);
+    return false;
   }
 
-  // if AF is set it is NACKed and we return false
+  /* if AF is set it is NACKed and we return false */
   if ((I2C1->SR1 & I2C_SR1_AF) != 0U) {
     I2C1->SR1 &= ~I2C_SR1_AF;
     I2C1->CR1 |= I2C_CR1_STOP;
@@ -78,40 +61,33 @@ static bool MPU6050_I2CStartAndAddress(uint8_t addr_7bit, bool read_direction)
 
 static bool MPU6050_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
 {
-  uint32_t start_tick = 0U;
-
   if (value == NULL) {
     return false;
   }
 
-  if (!MPU6050_I2CWaitIdle()) {
+  if (!I2C1_WaitIdle(MPU6050_I2C_TIMEOUT_MS)) {
+    MPU6050_SetError(MPU6050_ERR_I2C_BUSY_TIMEOUT, 0x00U);
     return false;
   }
 
   if (!MPU6050_I2CStartAndAddress(addr_7bit, false)) {
     return false;
   }
-  // clear ADDR
+  /* clear ADDR */
   (void)I2C1->SR1;
   (void)I2C1->SR2;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
   I2C1->DR = reg;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_BTF) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_BTF_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_BTF, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_BTF_TIMEOUT, reg);
+    return false;
   }
 
   if (!MPU6050_I2CStartAndAddress(addr_7bit, true)) {
@@ -123,13 +99,10 @@ static bool MPU6050_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
   (void)I2C1->SR2;
   I2C1->CR1 |= I2C_CR1_STOP;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_RXNE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_ACK;
-      MPU6050_SetError(MPU6050_ERR_RXNE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_RXNE, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_ACK;
+    MPU6050_SetError(MPU6050_ERR_RXNE_TIMEOUT, reg);
+    return false;
   }
 
   *value = (uint8_t)I2C1->DR;
@@ -139,9 +112,8 @@ static bool MPU6050_ReadReg8(uint8_t addr_7bit, uint8_t reg, uint8_t *value)
 
 static bool MPU6050_WriteReg8(uint8_t addr_7bit, uint8_t reg, uint8_t value)
 {
-  uint32_t start_tick = 0U;
-
-  if (!MPU6050_I2CWaitIdle()) {
+  if (!I2C1_WaitIdle(MPU6050_I2C_TIMEOUT_MS)) {
+    MPU6050_SetError(MPU6050_ERR_I2C_BUSY_TIMEOUT, 0x00U);
     return false;
   }
 
@@ -149,49 +121,36 @@ static bool MPU6050_WriteReg8(uint8_t addr_7bit, uint8_t reg, uint8_t value)
     return false;
   }
 
-  // clear ADDR
+  /* clear ADDR */
   (void)I2C1->SR1;
   (void)I2C1->SR2;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
   I2C1->DR = reg;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_TXE) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_TXE, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_TXE_TIMEOUT, reg);
+    return false;
   }
   I2C1->DR = value;
 
-  start_tick = HAL_GetTick();
-  while ((I2C1->SR1 & I2C_SR1_BTF) == 0U) {
-    if ((HAL_GetTick() - start_tick) >= MPU6050_I2C_TIMEOUT_MS) {
-      I2C1->CR1 |= I2C_CR1_STOP;
-      MPU6050_SetError(MPU6050_ERR_BTF_TIMEOUT, reg);
-      return false;
-    }
+  if (!I2C1_PollStatusRegisterUntilFlagSet(I2C_SR1_BTF, MPU6050_I2C_TIMEOUT_MS)) {
+    I2C1->CR1 |= I2C_CR1_STOP;
+    MPU6050_SetError(MPU6050_ERR_BTF_TIMEOUT, reg);
+    return false;
   }
 
   I2C1->CR1 |= I2C_CR1_STOP;
   return true;
 }
 
-static bool MPU6050_ReadBurst(
-  uint8_t addr_7bit,
-  uint8_t start_reg,
-  uint8_t *buffer,
-  uint32_t length
-)
+static bool
+MPU6050_ReadBurst(uint8_t addr_7bit, uint8_t start_reg, uint8_t *buffer, uint32_t length)
 {
   uint32_t index = 0U;
 
@@ -205,13 +164,8 @@ static bool MPU6050_ReadBurst(
    * while hardware/wiring is still being validated.
    */
   for (index = 0U; index < length; index++) {
-    if (!MPU6050_ReadReg8(
-          addr_7bit, (uint8_t)(start_reg + index), &buffer[index]
-        ))
-    {
-      MPU6050_SetError(
-        MPU6050_ERR_BURST_READ_FAIL, (uint8_t)(start_reg + index)
-      );
+    if (!MPU6050_ReadReg8(addr_7bit, (uint8_t)(start_reg + index), &buffer[index])) {
+      MPU6050_SetError(MPU6050_ERR_BURST_READ_FAIL, (uint8_t)(start_reg + index));
       return false;
     }
   }
@@ -294,9 +248,7 @@ bool MPU6050_ReadGyroAccel(ImuSample *sample)
     return false;
   }
 
-  if (!MPU6050_ReadBurst(
-        s_mpu6050_addr, MPU6050_REG_ACCEL_XOUT_H, raw, MPU6050_BURST_FRAME_BYTES
-      ))
+  if (!MPU6050_ReadBurst(s_mpu6050_addr, MPU6050_REG_ACCEL_XOUT_H, raw, MPU6050_BURST_FRAME_BYTES))
   {
     return false;
   }
@@ -309,12 +261,12 @@ bool MPU6050_ReadGyroAccel(ImuSample *sample)
   gyro_z_raw = (int16_t)(((uint16_t)raw[12] << 8) | raw[13]);
 
   sample->timestamp_ms = HAL_GetTick();
-  sample->accel_mps2[0] = (((float)accel_x_raw) / MPU6050_ACCEL_LSB_PER_G) *
-                          MPU6050_STANDARD_GRAVITY_MPS2;
-  sample->accel_mps2[1] = (((float)accel_y_raw) / MPU6050_ACCEL_LSB_PER_G) *
-                          MPU6050_STANDARD_GRAVITY_MPS2;
-  sample->accel_mps2[2] = (((float)accel_z_raw) / MPU6050_ACCEL_LSB_PER_G) *
-                          MPU6050_STANDARD_GRAVITY_MPS2;
+  sample->accel_mps2[0] =
+    (((float)accel_x_raw) / MPU6050_ACCEL_LSB_PER_G) * MPU6050_STANDARD_GRAVITY_MPS2;
+  sample->accel_mps2[1] =
+    (((float)accel_y_raw) / MPU6050_ACCEL_LSB_PER_G) * MPU6050_STANDARD_GRAVITY_MPS2;
+  sample->accel_mps2[2] =
+    (((float)accel_z_raw) / MPU6050_ACCEL_LSB_PER_G) * MPU6050_STANDARD_GRAVITY_MPS2;
   sample->gyro_dps[0] = ((float)gyro_x_raw) / MPU6050_GYRO_LSB_PER_DPS;
   sample->gyro_dps[1] = ((float)gyro_y_raw) / MPU6050_GYRO_LSB_PER_DPS;
   sample->gyro_dps[2] = ((float)gyro_z_raw) / MPU6050_GYRO_LSB_PER_DPS;
@@ -325,9 +277,6 @@ bool MPU6050_ReadGyroAccel(ImuSample *sample)
 
 uint8_t MPU6050_GetLastError(void) { return s_mpu6050_last_error; }
 
-uint8_t MPU6050_GetLastFailedRegister(void)
-{
-  return s_mpu6050_last_failed_reg;
-}
+uint8_t MPU6050_GetLastFailedRegister(void) { return s_mpu6050_last_failed_reg; }
 
 uint8_t MPU6050_GetLastWhoAmI(void) { return s_mpu6050_last_who_am_i; }

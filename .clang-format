@@ -12,7 +12,7 @@ BraceWrapping:
   BeforeCatch: true
 
 # Keep short signatures on one line; wrap long ones to a vertical list.
-ColumnLimit: 80
+ColumnLimit: 100
 BinPackParameters: false
 BinPackArguments: false
 AllowAllParametersOfDeclarationOnNextLine: false
